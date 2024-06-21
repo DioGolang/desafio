@@ -3,12 +3,11 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/gorilla/mux"
 	"io/ioutil"
 	"log"
 	"net/http"
-	"regexp"
 	"strconv"
-	"strings"
 	"time"
 )
 
@@ -54,7 +53,6 @@ func loadData() {
 		log.Fatalf("Failed to unmarshal data: %v", err)
 	}
 
-	// Convert string dates to time.Time
 	for i, event := range data.Events {
 		parsedDate, err := parseCustomTime(event.Date)
 		if err != nil {
@@ -76,8 +74,8 @@ func getEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 func getEventByID(w http.ResponseWriter, r *http.Request) {
-	idStr := strings.TrimPrefix(r.URL.Path, "/events/")
-	idStr = strings.TrimSuffix(idStr, "/")
+	vars := mux.Vars(r)
+	idStr := vars["eventID"]
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
 		http.Error(w, "Invalid event ID", http.StatusBadRequest)
@@ -95,78 +93,74 @@ func getEventByID(w http.ResponseWriter, r *http.Request) {
 }
 
 func getSpotsByEventID(w http.ResponseWriter, r *http.Request) {
-	// Extract event ID from the URL path using regular expression
-	re := regexp.MustCompile(`/events/(\d+)/spots`)
-	match := re.FindStringSubmatch(r.URL.Path)
-	if len(match) != 2 {
-		http.Error(w, "Invalid event ID format", http.StatusBadRequest)
-		return
-	}
-	idStr := match[1]
+	vars := mux.Vars(r)
+	eventIDStr := vars["eventID"]
+	log.Printf("Received request for eventID: %s", eventIDStr)
 
-	// Convert event ID to integer
-	id, err := strconv.Atoi(idStr)
+	eventID, err := strconv.Atoi(eventIDStr)
 	if err != nil {
+		log.Printf("Invalid event ID: %s", eventIDStr)
 		http.Error(w, "Invalid event ID", http.StatusBadRequest)
 		return
 	}
 
-	// Filter spots based on the extracted event ID
 	var eventSpots []Spot
 	for _, spot := range data.Spots {
-		if spot.EventID == id {
+		if spot.EventID == eventID {
 			eventSpots = append(eventSpots, spot)
 		}
 	}
 
-	// Handle success and error scenarios
-	if len(eventSpots) > 0 {
-		w.Header().Set("Content-Type", "application/json")
-		err := json.NewEncoder(w).Encode(eventSpots)
-		if err != nil {
-			return // Handle potential encoding error
-		}
-	} else {
+	if len(eventSpots) == 0 {
+		log.Printf("No spots found for event ID: %d", eventID)
 		http.Error(w, "No spots found for this event", http.StatusNotFound)
-	}
-}
-
-func reserveSpot(w http.ResponseWriter, r *http.Request) {
-	urlParts := strings.Split(r.URL.Path, "/")
-	if len(urlParts) != 4 {
-		http.Error(w, "Invalid URL format", http.StatusBadRequest)
 		return
 	}
 
-	eventID, err := strconv.Atoi(urlParts[2])
+	log.Printf("Found %d spots for event ID: %d", len(eventSpots), eventID)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(eventSpots)
+}
+
+func reserveSpot(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	eventIDStr := vars["eventID"]
+	eventID, err := strconv.Atoi(eventIDStr)
 	if err != nil {
 		http.Error(w, "Invalid event ID", http.StatusBadRequest)
 		return
 	}
 
-	spotName := urlParts[3]
-
-	for i, spot := range data.Spots {
-		if spot.EventID == eventID && spot.Name == spotName && spot.Status == "available" {
-			data.Spots[i].Status = "reserved"
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]string{"message": "Spot reserved"})
-			return
-		}
+	var spot Spot
+	if err := json.NewDecoder(r.Body).Decode(&spot); err != nil {
+		http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		return
 	}
 
-	http.Error(w, "Spot not available", http.StatusNotFound)
+	if spot.Name == "" {
+		http.Error(w, "Spot name is required", http.StatusBadRequest)
+		return
+	}
+
+	spot.ID = len(data.Spots) + 1
+	spot.Status = "reserved"
+	spot.EventID = eventID
+	data.Spots = append(data.Spots, spot)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(spot)
 }
 
 func main() {
 	loadData()
 
-	// Registre cada função handler com padrões de rota específicos
-	http.HandleFunc("/events", getEvents)
-	http.HandleFunc("/events/", getEventByID)
-	http.HandleFunc("/events/:id/spots", getSpotsByEventID)
-	http.HandleFunc("/events/reserve/", reserveSpot)
+	r := mux.NewRouter()
+	r.HandleFunc("/events", getEvents).Methods("GET")
+	r.HandleFunc("/events/{eventID}", getEventByID).Methods("GET")
+	r.HandleFunc("/events/{eventID}/spots", getSpotsByEventID).Methods("GET")
+	r.HandleFunc("/events/{eventID}/reserve", reserveSpot).Methods("POST")
 
 	fmt.Println("Server is running on port 8080")
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	log.Fatal(http.ListenAndServe(":8080", r))
 }
