@@ -142,6 +142,13 @@ func reserveSpot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	for _, existingSpot := range data.Spots {
+		if existingSpot.EventID == eventID && existingSpot.Name == spot.Name {
+			http.Error(w, "Spot already reserved", http.StatusBadRequest)
+			return
+		}
+	}
+
 	spot.ID = len(data.Spots) + 1
 	spot.Status = "reserved"
 	spot.EventID = eventID
