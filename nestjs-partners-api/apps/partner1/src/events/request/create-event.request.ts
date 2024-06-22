@@ -1,14 +1,14 @@
 import {IsInt, IsISO8601, IsNotEmpty, IsString, MaxLength, Min} from "class-validator";
 
 export class CreateEventRequest {
+  @MaxLength(255, {message: 'maximum 255 characters'})
   @IsNotEmpty({message: 'the name field is empty'})
   @IsString({message: 'invalid name'})
-  @MaxLength(255, {message: 'maximum 255 characters'})
   name: string;
 
+  @MaxLength(255, {message: 'maximum 255 characters'})
   @IsNotEmpty({message: 'the description field is empty'})
   @IsString({message: 'invalid description'})
-  @MaxLength(255, {message: 'maximum 255 characters'})
   description: string;
 
   @IsNotEmpty({message: 'the date field is empty'})
